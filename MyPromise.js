@@ -1,166 +1,215 @@
+// 把finally的功能也实现一下
 const MyPromise = function () {
-  const PENDING = 'pending';
-  const FULFILLED = 'fulfilled';
+  const FULLFILLED = 'fullfilled';
   const REJECTED = 'rejected';
+  const PENDING = 'pending';
 
+  // 私有变量
   const PromiseStatus = Symbol('PromiseStatus');
+  const ResHandlers = Symbol('ResHandlers');
+  const ErrHandlers = Symbol('ErrHandlers');
   const PromiseValue = Symbol('PromiseValue');
-  const resHandlers = Symbol('resHanders');
-  const errHandlers = Symbol('errHanders');
 
-  // 内部处理方法
-  const changeStatus = Symbol('handleResult');
-  const linkPromise = Symbol('linkPromise');
-  const settledHandler = Symbol('settledHandler');
+  // 私有方法
+  const resAndErr = Symbol('resAndErr');
+  const exeHandler = Symbol('exeHandler');
+  const thenAndCatch = Symbol('thenAndCatch');
 
-  return class {
-    /**
-     * 改变状态的函数
-     * @param {*} data 数据
-     * @param {*} status 要改变的状态 fulfilled or rejected
-     * @param {*} queue 处理队列
-     * @returns 
-     */
-    [changeStatus](data, status, queue) {
-      if (this[PromiseStatus] !== PENDING) return;
-      // 改变状态
-      this[PromiseStatus] = status;
-      this[PromiseValue] = data;
-      // 执行响应函数
-      queue.forEach(p => {
-        p(data);
-      });
-    }
-    /**
-     * 
-     * @param {*} execute 
-     */
-    constructor(executor) {
+  return class MyPromise {
+    constructor(executer) {
       this[PromiseStatus] = PENDING;
-      this[PromiseValue] = undefined;
-      this[resHandlers] = [];
-      this[errHandlers] = [];
+      this[ResHandlers] = [];
+      this[ErrHandlers] = [];
 
-      const resolve = (res) => {
-        this[changeStatus](res, FULFILLED, this[resHandlers]);
+      const resolve = res => {
+        this[resAndErr](res, FULLFILLED, this[ResHandlers]);
       }
-      const reject = (err) => {
-        this[changeStatus](err, REJECTED, this[errHandlers]);
+      const reject = err => {
+        this[resAndErr](err, REJECTED, this[ErrHandlers]);
       }
-      executor(resolve, reject);
+      executer(resolve, reject);
+    }
+    // 抽离resolve 和 reject方法中的操作
+    [resAndErr](value, status, handlers) {
+      if (this[PromiseStatus] !== PENDING) {
+        return;
+      }
+      // 修改状态
+      this[PromiseStatus] = status;
+      this[PromiseValue] = value;
+      // 执行then方法传进来的处理函数
+      handlers.forEach(p => {
+        // 为了模拟真实的微任务，我们这里借用Promise的resolve方法，写一个立执行的微任务
+        Promise.resolve().then(() => p(value));
+      })
     }
 
-    /**
-     * 处理resHandler 或 errHandler
-     * @param {*} handler 处理函数
-     * @param {*} status  对应的是那个状态
-     * @param {*} queue   是Pending状态，要存入的处理队列
-     */
-    [settledHandler](handler, status, queue) {
-      if (this[PromiseStatus] === status) {
-        setTimeout(() => { // 这里使用 宏任务 去代替 微任务
-          handler();
-        });
-      } else {
-        queue.push(handler);
-      }
-    }
-    /**
-     * 处理 resHandler和errHandler，返回新生成的Promise 对象
-     * 这里的的话 resHandler 和 errHandler 都要去做相应的判断，和处理，当然这两个函数最终只有一个可以处理
-     * 1、判断promise的状态是否是pengding，
-     *  若是pending，则将 相应的 resHandler 和 errhandler 存入 执行队列中
-     *  若不是pending，则将 直接执行的 resHandler 和 errHandler
-     * 2、在执行对应的 resHandler 或 errHandler 的时候，还要做一些判断
-     **** 1、是否为空？ 若为空，则直接将resolve promise的值
-     **** 2、若不为空 则判断对应的resHandler or errHandler 执行的结果是否为 一个Promise对象，
-     *     * 1、若是promise对象，则执行这个promise的then方法，同步这个promise 和 新生成promise的状态。
-     *     * 2、若不是，则将返回的值，直接 resolve
-     * @param {*} resHandler  状态为 fulfiled时的 响应函数
-     * @param {*} errHandler  状态为 rejected时的 响应函数
-     * @returns 返回新的promise
-     */
-    [linkPromise](resHandler, errHandler) {
-      function exec(context, hander, resolve, reject) {
-        let res = hander(context[PromiseValue]);
-        if (res instanceof MyPromise) {
-          res.then(res => resolve(res), err => reject(err));
-        } else {
-          resolve(res);
-        }
-      }
-      return new Promise((resolve, reject) => {
-        // 处理 resHandler
-        this[settledHandler](() => {
-          if (resHandler === undefined) {
-            resolve(this[PromiseValue]);
-            return;
-          }
-          exec(this, resHandler, resolve, reject);
-        }, FULFILLED, this[resHandlers]);
-
-        // 处理errHandler
-        this[settledHandler](() => {
-          if (errHandler === undefined) {
-            reject(this[PromiseValue]);
-            return;
-          }
-          exec(this, errHandler, resolve, reject);
-        }, REJECTED, this[errHandlers]);
-      });
-    }
     then(resHandler, errHandler) {
-      return this[linkPromise](resHandler, errHandler);
+      return this[thenAndCatch](resHandler, errHandler);
     }
     catch (errHandler) {
-      return this[linkPromise](undefined, errHandler);
+      return this[thenAndCatch](undefined, errHandler);
     }
 
-    /**
-     * 当数组中每个promise都变为 fulfilled 的时候，resolve这些promise结果组成的数组
-     * 当数组中有一个promise变为了 rejected 那么 直接reject
-     * @param {*} pros: promise对象组成的数组 
-     * @returns 
-     */
-    static all(pros) {
-      let resCount = 0;
-      let resArr = [];
-      return new MyPromise(function (resolve, reject) {
-        pros.forEach(p => {
-          p.then(res => {
-            resArr.push(res);
-            if (++resCount === pros.length) {
-              resolve(resArr);
-            }
-          }, err => {
-            reject(err);
+    //抽离then 和 catch 的公共部分
+    [thenAndCatch](resHandler, errHandler) {
+      return new Promise((resolve, reject) => {
+        if (this[PromiseStatus] !== PENDING) {
+          if (this[PromiseStatus] === FULLFILLED) {
+            Promise.resolve().then(() => {
+              this[exeHandler](resHandler, 1, resolve, reject);
+            })
+          } else if (this[PromiseStatus] === REJECTED) {
+            Promise.resolve().then(() => {
+              this[exeHandler](errHandler, 2, resolve, reject);
+            })
+          }
+        } else {
+          this[ResHandlers].push(() => {
+            this[exeHandler](resHandler, 1, resolve, reject);
           });
-        });
+          this[ErrHandlers].push(() => {
+            this[exeHandler](errHandler, 2, resolve, reject);
+          });
+        }
       });
     }
-    static race(pros) {
-      return new MyPromise((resolve, reject) => {
-        pros.forEach(p => {
-          p.then(res => {
-            resolve(res);
-          }, err => {
-            reject(err);
-          })
-        })
-      });
-    }
-    static resolve(data) {
-      if (data instanceof MyPromise) {
-        return data;
+
+    // 抽离thenAndCatch方法中的公共部分
+    // type: 1 表示成功回调， 2表示失败回调
+    [exeHandler](handler, type, resolve, reject) {
+      if (handler === undefined) {
+        type === 1 ? resolve(this[PromiseValue]) : reject(this[PromiseValue]);
+        return;
       }
-      return new MyPromise(resolve => resolve(data));
-    }
-    static reject(data) {
+
+      let res = handler(this[PromiseValue]);
+      if (res instanceof MyPromise) {
+        res.then(res => resolve(res), err => reject(err));
+      } else {
+        resolve(res);
+      }
+    } finally(fun) {
       return new MyPromise((resolve, reject) => {
-        reject(data);
+        // fun返回的不是promise，返回一个 this的镜像。
+        // fun返回的是一个成功的promise，返回一个this的镜像，但要在this的状态确定后 再去返回。
+        // fun返回的是一个失败的promise，但会这个失败的promise的镜像，注意也要在this的状态确定后 再去返回。
+
+        // 当 fun 中 throw了错误时，会返回一个失败的promise，值是 throw扔出的值
+
+        let result;
+        try {
+          result = fun();
+        } catch (err) {
+          this.then(res => reject(err), err => reject(err));
+        }
+
+        if (result instanceof MyPromise) {
+          const resAnderr = (thisRes, statusHandler) => {
+            result.then(res => statusHandler(thisRes), err => reject(err));
+          }
+          this.then(res => resAnderr(res, resolve), err => resAnderr(err, reject));
+        } else {
+          this.then(res => resolve(res), err => reject(res))
+        }
       })
+    }
+
+    static resolve(value) {
+      if (value instanceof MyPromise) {
+        return value;
+      } else {
+        return new MyPromise((resolve, reject) => {
+          resolve(value);
+        })
+      }
+    }
+
+    static reject(value) {
+      return new MyPromise((resolve, reject) => {
+        reject(value);
+      })
+    }
+
+    static all(arr) {
+      if (!arr[Symbol.iterator]) {
+        throw '请传入一个可迭代对象';
+      }
+      let len = 0;  // 由于是迭代器对象，所以我们是不知道它们的长度的
+      for(let x of arr) {
+        len++;
+      }
+      if(len === 0) {
+        return MyPromise.resolve([]);
+      }
+
+      return new MyPromise((resolve, reject) => {
+        let isAllResolve = true;
+        let resArr = [];
+        let count = 0;
+        const fun = (err) => {
+          count++;
+          if (count === len && isAllResolve) {
+            resolve(resArr);
+          } else if (isAllResolve === false) {
+            reject(err);
+          }
+        }
+
+        for (let x of arr) {  // 由于是迭代器对象，所以使用 for-of 来遍历
+          if (x instanceof MyPromise) {
+            x.then(res => {
+              resArr.push(res);
+              fun();
+            }, err => {
+              if (isAllResolve !== false) {  // 这样写的目的只是为了提高代码的执行效率
+                isAllResolve = false;
+                fun(err);
+              }
+            })
+          } else {
+            MyPromise.resolve(x).then(res => {
+              resArr.push(res);
+              fun();
+            }, err => {
+              if (isAllResolve !== false) {
+                isAllResolve = false;
+                fun(err);
+              }
+            })
+          }
+        }
+
+      })
+    }
+
+    static race(arr) {
+      if(!arr[Symbol.iterator]) {
+        throw '请传入一个可迭代对象'
+      }
+      let len = 0;
+      for(let x of arr) {
+        len++;
+      }
+      if(len === 0) {
+        return new MyPromise((resolve, reject) => {});
+      }
+
+      return new MyPromise((resolve, reject) => {
+        for(let x of arr) {
+          if(x instanceof MyPromise) {
+            x.then(res => {
+              resolve(res);
+            }, err => {
+              reject(err);
+            }) 
+          } else {
+            MyPromise.resolve(x).then(res => {
+              resolve(res);
+            })
+          }
+        }
+      }) 
     }
   }
 }();
-
- 
