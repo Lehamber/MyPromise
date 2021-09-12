@@ -89,7 +89,9 @@ const MyPromise = function () {
       } else {
         resolve(res);
       }
-    } finally(fun) {
+    } 
+    
+    finally(fun) {
       return new MyPromise((resolve, reject) => {
         // fun返回的不是promise，返回一个 this的镜像。
         // fun返回的是一个成功的promise，返回一个this的镜像，但要在this的状态确定后 再去返回。
@@ -132,54 +134,47 @@ const MyPromise = function () {
     }
 
     static all(arr) {
-      if (!arr[Symbol.iterator]) {
-        throw '请传入一个可迭代对象';
+      if (!iterObj[Symbol.iterator]) {
+        throw '请传入一个可迭代对象'
       }
-      let len = 0;  // 由于是迭代器对象，所以我们是不知道它们的长度的
-      for(let x of arr) {
+    
+      let len = 0;
+      for (let x of iterObj) {
         len++;
       }
+    
       if(len === 0) {
-        return MyPromise.resolve([]);
+        return [];
       }
-
-      return new MyPromise((resolve, reject) => {
-        let isAllResolve = true;
-        let resArr = [];
-        let count = 0;
-        const fun = (err) => {
-          count++;
-          if (count === len && isAllResolve) {
-            resolve(resArr);
-          } else if (isAllResolve === false) {
-            reject(err);
-          }
+    
+      return new Promise((resolve, reject) => {
+        let count = 0,
+          resArr = [],
+          i = 0;
+        for (let x of iterObj) {
+          ! function (i) {
+            if (x.constructor === Promise) {
+              x.then(res => {
+                resArr[i] = res;
+                count++;
+                if (count === len) {
+                  resolve(resArr);
+                }
+              }, err => {
+                reject(err);
+              })
+            } else {
+              Promise.resolve(x).then(res => {
+                resArr[i] = res;
+                count++;
+                if (count === len) {
+                  resolve(resArr);
+                }
+              })
+            }
+          }(i);
+          i++;
         }
-
-        for (let x of arr) {  // 由于是迭代器对象，所以使用 for-of 来遍历
-          if (x instanceof MyPromise) {
-            x.then(res => {
-              resArr.push(res);
-              fun();
-            }, err => {
-              if (isAllResolve !== false) {  // 这样写的目的只是为了提高代码的执行效率
-                isAllResolve = false;
-                fun(err);
-              }
-            })
-          } else {
-            MyPromise.resolve(x).then(res => {
-              resArr.push(res);
-              fun();
-            }, err => {
-              if (isAllResolve !== false) {
-                isAllResolve = false;
-                fun(err);
-              }
-            })
-          }
-        }
-
       })
     }
 
@@ -213,3 +208,24 @@ const MyPromise = function () {
     }
   }
 }();
+
+
+let p = Promise.all(
+  [
+    new Promise((resolve, reject) => {
+      setTimeout(function() {
+        reject(1)
+      }, 200)
+    }),
+    new Promise((resolve, reject) => {
+      setTimeout(function() {
+        reject(2)
+      }, 0)
+    })
+  ]
+);
+ 
+setTimeout(console.log, 500, p)
+p.catch(err => {
+  console.log(err);
+})
