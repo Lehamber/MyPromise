@@ -133,7 +133,7 @@ const MyPromise = function () {
       })
     }
 
-    static all(arr) {
+    static all(iterObj) {
       if (!iterObj[Symbol.iterator]) {
         throw '请传入一个可迭代对象'
       }
@@ -147,13 +147,13 @@ const MyPromise = function () {
         return [];
       }
     
-      return new Promise((resolve, reject) => {
+      return new MyPromise((resolve, reject) => {
         let count = 0,
           resArr = [],
           i = 0;
         for (let x of iterObj) {
           ! function (i) {
-            if (x.constructor === Promise) {
+            if (x.constructor === MyPromise) {
               x.then(res => {
                 resArr[i] = res;
                 count++;
@@ -164,7 +164,7 @@ const MyPromise = function () {
                 reject(err);
               })
             } else {
-              Promise.resolve(x).then(res => {
+              MyPromise.resolve(x).then(res => {
                 resArr[i] = res;
                 count++;
                 if (count === len) {
@@ -210,14 +210,14 @@ const MyPromise = function () {
 }();
 
 
-let p = Promise.all(
+let p = MyPromise.all(
   [
-    new Promise((resolve, reject) => {
+    new MyPromise((resolve, reject) => {
       setTimeout(function() {
         reject(1)
       }, 200)
     }),
-    new Promise((resolve, reject) => {
+    new MyPromise((resolve, reject) => {
       setTimeout(function() {
         reject(2)
       }, 0)
