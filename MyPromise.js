@@ -202,8 +202,6 @@ const MyPromise = function () {
 	}
 }();
 
-
-
 let p1 = Promise.all([])
 
 setTimeout(console.log, 0, p1);
