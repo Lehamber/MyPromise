@@ -1,198 +1,191 @@
-// 把finally的功能也实现一下
 const MyPromise = function () {
-  const FULLFILLED = 'fullfilled';
-  const REJECTED = 'rejected';
-  const PENDING = 'pending';
 
-  // 私有变量
-  const PromiseStatus = Symbol('PromiseStatus');
-  const ResHandlers = Symbol('ResHandlers');
-  const ErrHandlers = Symbol('ErrHandlers');
-  const PromiseValue = Symbol('PromiseValue');
+	const PENDING = 'pending';
+	const FULFILLED = 'fulfilled';
+	const REJECTED = 'rejected';
 
-  // 私有方法
-  const resAndErr = Symbol('resAndErr');
-  const exeHandler = Symbol('exeHandler');
-  const thenAndCatch = Symbol('thenAndCatch');
+	const PromiseValue = Symbol('PromiseValue');
+	const PromiseStatus = Symbol('PromiseStatus')
 
-  return class MyPromise {
-    constructor(executer) {
-      this[PromiseStatus] = PENDING;
-      this[ResHandlers] = [];
-      this[ErrHandlers] = [];
+	const ResHandlers = Symbol('ResHandlers');
+	const ErrHandlers = Symbol('ErrHandlers');
 
-      const resolve = res => {
-        this[resAndErr](res, FULLFILLED, this[ResHandlers]);
-      }
-      const reject = err => {
-        this[resAndErr](err, REJECTED, this[ErrHandlers]);
-      }
-      executer(resolve, reject);
-    }
-    // 抽离resolve 和 reject方法中的操作
-    [resAndErr](value, status, handlers) {
-      if (this[PromiseStatus] !== PENDING) {
-        return;
-      }
-      // 修改状态
-      this[PromiseStatus] = status;
-      this[PromiseValue] = value;
-      // 执行then方法传进来的处理函数
-      handlers.forEach(p => {
-        // 为了模拟真实的微任务，我们这里借用Promise的resolve方法，写一个立执行的微任务
-        Promise.resolve().then(() => p(value));
-      })
-    }
+	//私有函数
+	const resAndRej = Symbol('resAndRej');
+	const thenAndCatch = Symbol('thenAndCatch');
+	const handlerWrap = Symbol('handlerWrap');
 
-    then(resHandler, errHandler) {
-      return this[thenAndCatch](resHandler, errHandler);
-    }
-    catch (errHandler) {
-      return this[thenAndCatch](undefined, errHandler);
-    }
+	return class {
+		constructor(exe) {
+			this[PromiseStatus] = PENDING;
+			this[ResHandlers] = [];
+			this[ErrHandlers] = [];
 
-    //抽离then 和 catch 的公共部分
-    [thenAndCatch](resHandler, errHandler) {
-      return new Promise((resolve, reject) => {
-        if (this[PromiseStatus] !== PENDING) {
-          if (this[PromiseStatus] === FULLFILLED) {
-            Promise.resolve().then(() => {
-              this[exeHandler](resHandler, 1, resolve, reject);
-            })
-          } else if (this[PromiseStatus] === REJECTED) {
-            Promise.resolve().then(() => {
-              this[exeHandler](errHandler, 2, resolve, reject);
-            })
-          }
-        } else {
-          this[ResHandlers].push(() => {
-            this[exeHandler](resHandler, 1, resolve, reject);
-          });
-          this[ErrHandlers].push(() => {
-            this[exeHandler](errHandler, 2, resolve, reject);
-          });
-        }
-      });
-    }
+			const resolve = (res) => {
+				this[resAndRej](res, FULFILLED, this[ResHandlers]);
+			}
 
-    // 抽离thenAndCatch方法中的公共部分
-    // type: 1 表示成功回调， 2表示失败回调
-    [exeHandler](handler, type, resolve, reject) {
-      if (handler === undefined) {
-        type === 1 ? resolve(this[PromiseValue]) : reject(this[PromiseValue]);
-        return;
-      }
+			const reject = (err) => {
+				this[resAndRej](err, REJECTED, this[ErrHandlers]);
+			}
+			exe(resolve, reject);
+		}
 
-      let res = handler(this[PromiseValue]);
-      if (res instanceof MyPromise) {
-        res.then(res => resolve(res), err => reject(err));
-      } else {
-        resolve(res);
-      }
-    } 
-    
-    finally(fun) {
-      return new MyPromise((resolve, reject) => {
-        // fun返回的不是promise，返回一个 this的镜像。
-        // fun返回的是一个成功的promise，返回一个this的镜像，但要在this的状态确定后 再去返回。
-        // fun返回的是一个失败的promise，但会这个失败的promise的镜像，注意也要在this的状态确定后 再去返回。
+		[resAndRej](value, status, handlers) {
+			if (this[PromiseStatus] !== PENDING) {
+				return;
+			}
+			this[PromiseStatus] = status;
+			this[PromiseValue] = value;
 
-        // 当 fun 中 throw了错误时，会返回一个失败的promise，值是 throw扔出的值
+			handlers.forEach(p => {
+				p(value);
+			})
+		}
 
-        let result;
-        try {
-          result = fun();
-        } catch (err) {
-          this.then(res => reject(err), err => reject(err));
-        }
+		then(resCall, rejCall) {
+			return this[thenAndCatch](resCall, rejCall);
+		}
 
-        if (result instanceof MyPromise) {
-          const resAnderr = (thisRes, statusHandler) => {
-            result.then(res => statusHandler(thisRes), err => reject(err));
-          }
-          this.then(res => resAnderr(res, resolve), err => resAnderr(err, reject));
-        } else {
-          this.then(res => resolve(res), err => reject(res))
-        }
-      })
-    }
+		catch (rejCall) {
+			return this[thenAndCatch](undefined, rejCall);
+		}
 
-    static resolve(value) {
-      if (value instanceof MyPromise) {
-        return value;
-      } else {
-        return new MyPromise((resolve, reject) => {
-          resolve(value);
-        })
-      }
-    }
+		[thenAndCatch](resCall, rejCall) {
+			return new MyPromise((resolve, reject) => {
+				const resFun = () => {
+					this[handlerWrap](resCall, resolve, resolve, reject);
+				}
+				const rejFun = () => {
+					this[handlerWrap](rejCall, reject, resolve, reject);
+				}
 
-    static reject(value) {
-      return new MyPromise((resolve, reject) => {
-        reject(value);
-      })
-    }
+				if (this[PromiseStatus] === FULFILLED) {
+					resFun();
+				} else if (this[PromiseStatus] === REJECTED) {
+					rejFun();
+				} else if (this[PromiseStatus] === PENDING) {
+					this[ResHandlers].push(resFun);
+					this[ErrHandlers].push(rejFun);
+				}
+			})
+		}
 
-    static all(iterObj) {
-      if (!iterObj[Symbol.iterator]) {
-        throw '请传入一个可迭代对象'
-      }
-    
-      let len = 0;
-      for (let x of iterObj) {
-        len++;
-      }
-    
-      if(len === 0) {
-        return [];
-      }
-    
-      return new MyPromise((resolve, reject) => {
-        let count = 0,
-          resArr = [],
-          i = 0;
-        for (let x of iterObj) {
-          ! function (i) {
-            if (x.constructor === MyPromise) {
-              x.then(res => {
-                resArr[i] = res;
-                count++;
-                if (count === len) {
-                  resolve(resArr);
-                }
-              }, err => {
-                reject(err);
-              })
-            } else {
-              MyPromise.resolve(x).then(res => {
-                resArr[i] = res;
-                count++;
-                if (count === len) {
-                  resolve(resArr);
-                }
-              })
-            }
-          }(i);
-          i++;
-        }
-      })
-    }
+		[handlerWrap](call, returnFun, resolve, reject) {
+			Promise.resolve().then(() => {
+				if (call === undefined) {
+					returnFun(this[PromiseValue]);
+					return;
+				}
 
-    static race(arr) {
-      if(!arr[Symbol.iterator]) {
-        throw '请传入一个可迭代对象'
-      }
-      let len = 0;
-      for(let x of arr) {
-        len++;
-      }
-      if(len === 0) {
+				let res = call(this[PromiseValue]);
+				if (MyPromise.prototype.isPrototypeOf(res)) {
+					res.then(res => void resolve(res), err => void reject(err));
+				} else {
+					resolve(res);
+				}
+			})
+		};
+
+		finally(fun) {
+
+			return new MyPromise((resolve, reject) => {
+
+				const exe = (handler, thisRes) => {
+					try {
+						let result = fun();
+						if (MyPromise.prototype.isPrototypeOf(result)) {
+							result.then(() => handler(thisRes), err => reject(err));
+						} else {
+							handler(thisRes);
+						}
+					} catch (err) {
+						reject(err);
+					}
+				}
+				this.then(res => {
+					exe(resolve, res);
+				}, err => {
+					exe(reject, err);
+				})
+			})
+		}
+
+		static resolve(value) {
+			return new MyPromise((resolve, reject) => {
+				if (value instanceof MyPromise) {
+					value.then(res => {
+						resolve(res);
+					}, err => {
+						reject(err);
+					})
+				} else {
+					resolve(value);
+				}
+			})
+		}
+
+		static reject(value) {
+			return new MyPromise((resolve, reject) => {
+				reject(value);
+			})
+		}
+
+		static all(iterObj) {
+			if (iterObj[Symbol.iterator] === undefined) {
+				throw '请传入一个可迭代对象';
+			}
+			iterObj = [...iterObj];
+
+			return new MyPromise((resolve, reject) => {
+				let count = 0;
+				let resArr = [];
+
+			// 可带爹对象为空的时候 返回结果为一个空数组的 成功状态的promise
+				if(iterObj.length === 0) {
+					resovle([]);
+				}
+
+				for (let i = 0; i < iterObj.length; i++) {
+
+					! function (i) {
+						if (MyPromise.prototype.isPrototypeOf(iterObj[i])) {
+							iterObj[i].then(res => {
+								resArr[i] = res;
+								count++;
+								if (count === len) {
+									resolve(resArr);
+								}
+							}, err => {
+								reject(err);
+							})
+						} else {
+							MyPromise.resovle(iterObj[i]).then(res => {
+								resArr[i] = res;
+								count++;
+								if (count === len) {
+									return resArr;
+								}
+							})
+						}
+					}(i);
+				}
+			})
+		}
+
+		static race(iterObj) {
+			// 可带爹对象为空的时候 返回要给pending状态的promise
+			if (iterObj[Symbol.iterator] === undefined) {
+				throw '请传入一个可迭代对象';
+			}
+
+			iterObj = [...iterObj];
+			if(iterObj.length === 0) {
         return new MyPromise((resolve, reject) => {});
       }
-
-      return new MyPromise((resolve, reject) => {
-        for(let x of arr) {
-          if(x instanceof MyPromise) {
+			return new MyPromise((resolve, reject) => {
+				for (let x of iterObj) {
+					if(x instanceof MyPromise) {
             x.then(res => {
               resolve(res);
             }, err => {
@@ -203,29 +196,20 @@ const MyPromise = function () {
               resolve(res);
             })
           }
-        }
-      }) 
-    }
-  }
+				}
+			})
+		}
+	}
 }();
 
 
-let p = MyPromise.all(
-  [
-    new MyPromise((resolve, reject) => {
-      setTimeout(function() {
-        reject(1)
-      }, 200)
-    }),
-    new MyPromise((resolve, reject) => {
-      setTimeout(function() {
-        reject(2)
-      }, 0)
-    })
-  ]
-);
- 
-setTimeout(console.log, 500, p)
-p.catch(err => {
-  console.log(err);
-})
+
+let p1 = Promise.all([])
+
+setTimeout(console.log, 0, p1);
+
+// p1.then(res => {
+// 	console.log('res:', res);
+// }, err => {
+// 	console.log('err:', err);
+// })
